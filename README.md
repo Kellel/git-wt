@@ -21,9 +21,11 @@ the repository and is not committed.
 
 ## Requirements
 
-- Linux
 - Git with `git worktree list --porcelain -z` support
 - Go 1.26 or later for installation
+
+`git wt` is tested on Linux and expected to work on macOS and other Unix-like
+systems supported by Go and Git.
 
 ## Install
 
