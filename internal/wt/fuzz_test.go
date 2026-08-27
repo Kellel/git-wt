@@ -64,12 +64,12 @@ func FuzzProjectNameFromRemote(f *testing.F) {
 
 func FuzzProjectKeyStaysWithinWorkspace(f *testing.F) {
 	for _, seed := range []string{
-		"cf/addr-api",
+		"team/example-api",
 		"personal/git-tools",
 		"../outside",
-		"cf/../../outside",
-		"cf/project\x00suffix",
-		"cf/\u202eproject",
+		"team/../../outside",
+		"team/project\x00suffix",
+		"team/\u202eproject",
 		"",
 	} {
 		f.Add(seed)

@@ -1,6 +1,4 @@
-GOPROXY ?= https://athens.cfdata.org,direct
 GOLANGCI_LINT_VERSION ?= v2.13.1
-export GOPROXY
 
 .PHONY: check install lint test fuzz
 

@@ -21,9 +21,9 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 
 	stdout, _ := runTestApp(t, testRoot, env,
 		"--root", workspace,
-		"clone", remote, "cf/demo",
+		"clone", remote, "team/demo",
 	)
-	projectRoot := filepath.Join(workspace, "cf", "demo")
+	projectRoot := filepath.Join(workspace, "team", "demo")
 	trunk := filepath.Join(projectRoot, "trunk")
 	worktrees := filepath.Join(projectRoot, "worktrees")
 	notes := filepath.Join(projectRoot, "notes")
@@ -34,14 +34,14 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 
 	stdout, _ = runTestApp(t, testRoot, env,
 		"--root", workspace,
-		"path", "--project", "cf/demo",
+		"path", "--project", "team/demo",
 	)
 	if got := strings.TrimSpace(stdout); got != trunk {
 		t.Fatalf("trunk path = %q, want %q", got, trunk)
 	}
 	stdout, _ = runTestApp(t, testRoot, env,
 		"--root", workspace,
-		"path", "--notes", "--project", "cf/demo",
+		"path", "--notes", "--project", "team/demo",
 	)
 	if got := strings.TrimSpace(stdout); got != notes {
 		t.Fatalf("notes path = %q, want %q", got, notes)
@@ -356,12 +356,12 @@ func TestCloneRejectsNamespaceSymlinkEscapingWorkspace(t *testing.T) {
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(workspace, "cf")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(workspace, "team")); err != nil {
 		t.Fatal(err)
 	}
 
 	_, _, err := runTestAppError(testRoot, envWith(env, "WT_ROOT", workspace),
-		"clone", remote, "cf/demo",
+		"clone", remote, "team/demo",
 	)
 	assertErrorContains(t, err, "resolves outside workspace root")
 	assertNotExist(t, filepath.Join(outside, "demo"))
@@ -375,11 +375,11 @@ func TestRemoveWithoutBranchDeletionRetainsBranch(t *testing.T) {
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
 	configured := envWith(env, "WT_ROOT", workspace)
-	runTestApp(t, testRoot, configured, "clone", remote, "cf/demo")
-	trunk := filepath.Join(workspace, "cf", "demo", "trunk")
+	runTestApp(t, testRoot, configured, "clone", remote, "team/demo")
+	trunk := filepath.Join(workspace, "team", "demo", "trunk")
 	runTestApp(t, trunk, configured, "new", "retained")
 	runTestApp(t, trunk, configured, "remove", "retained")
-	assertNotExist(t, filepath.Join(workspace, "cf", "demo", "worktrees", "retained"))
+	assertNotExist(t, filepath.Join(workspace, "team", "demo", "worktrees", "retained"))
 	if code := gitExit(t, env, trunk, "show-ref", "--verify", "--quiet", "refs/heads/retained"); code != 0 {
 		t.Fatalf("retained branch show-ref exit = %d, want 0", code)
 	}
@@ -406,11 +406,11 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
 	configured := envWith(env, "WT_ROOT", workspace)
-	runTestApp(t, testRoot, configured, "clone", remote, "cf/demo")
+	runTestApp(t, testRoot, configured, "clone", remote, "team/demo")
 
-	trunk := filepath.Join(workspace, "cf", "demo", "trunk")
+	trunk := filepath.Join(workspace, "team", "demo", "trunk")
 	runTestApp(t, trunk, configured, "new", "TASK-123")
-	task := filepath.Join(workspace, "cf", "demo", "worktrees", "TASK-123")
+	task := filepath.Join(workspace, "team", "demo", "worktrees", "TASK-123")
 
 	seed := filepath.Join(testRoot, "seed")
 	writeFile(t, filepath.Join(seed, "tracked.txt"), "upstream update\n")
@@ -485,12 +485,12 @@ func TestNewUsesConfiguredBranchTemplateAndRefusesCollisions(t *testing.T) {
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
 	runTestApp(t, testRoot, env,
-		"--root", workspace, "clone", remote, "cf/demo",
+		"--root", workspace, "clone", remote, "team/demo",
 	)
-	trunk := filepath.Join(workspace, "cf", "demo", "trunk")
+	trunk := filepath.Join(workspace, "team", "demo", "trunk")
 	configured := envWith(env, "WT_ROOT", workspace, "WT_BRANCH_TEMPLATE", "kellen/%s")
 	runTestApp(t, trunk, configured, "new", "TASK-9-name")
-	taskPath := filepath.Join(workspace, "cf", "demo", "worktrees", "TASK-9-name")
+	taskPath := filepath.Join(workspace, "team", "demo", "worktrees", "TASK-9-name")
 	if got := gitOutput(t, env, taskPath, "branch", "--show-current"); got != "kellen/TASK-9-name" {
 		t.Fatalf("branch = %q", got)
 	}
@@ -510,13 +510,13 @@ func TestRemoveRefusesUnmergedBranchAndActiveOperation(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	runTestApp(t, testRoot, env, "--root", workspace, "clone", remote, "cf/demo")
-	trunk := filepath.Join(workspace, "cf", "demo", "trunk")
+	runTestApp(t, testRoot, env, "--root", workspace, "clone", remote, "team/demo")
+	trunk := filepath.Join(workspace, "team", "demo", "trunk")
 	gitRun(t, env, trunk, "config", "user.name", "Git WT Tests")
 	gitRun(t, env, trunk, "config", "user.email", "git-wt@example.invalid")
 	configured := envWith(env, "WT_ROOT", workspace)
 	runTestApp(t, trunk, configured, "new", "unmerged")
-	taskPath := filepath.Join(workspace, "cf", "demo", "worktrees", "unmerged")
+	taskPath := filepath.Join(workspace, "team", "demo", "worktrees", "unmerged")
 	writeFile(t, filepath.Join(taskPath, "feature.txt"), "feature\n")
 	gitRun(t, env, taskPath, "add", "feature.txt")
 	gitRun(t, env, taskPath, "commit", "-m", "feature")
@@ -751,6 +751,6 @@ func assertErrorContains(t *testing.T, err error, substring string) {
 }
 
 func ExampleApp_Run() {
-	fmt.Println("git wt path --project cf/addr-api")
-	// Output: git wt path --project cf/addr-api
+	fmt.Println("git wt path --project team/example-api")
+	// Output: git wt path --project team/example-api
 }

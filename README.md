@@ -17,12 +17,9 @@ lives at the project root, it is outside the repository and is not committed.
 Agents may keep temporary working files, scratchpads, plans, and handoff notes
 in the local, unmanaged `notes/` directory.
 
-The complete behavior and safety contract is in [SPEC.md](SPEC.md).
-
 ## Install
 
-Build and install the external Git subcommand through the internal Athens Go
-module proxy:
+Build and install the external Git subcommand:
 
 ```bash
 make install
