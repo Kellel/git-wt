@@ -390,7 +390,7 @@ func TestEveryCommandProvidesHelp(t *testing.T) {
 
 	testRoot := t.TempDir()
 	env := testEnvironment(t, testRoot)
-	for _, command := range []string{"clone", "adopt", "new", "list", "path", "pull", "remove", "shell-init"} {
+	for _, command := range []string{"clone", "adopt", "new", "list", "path", "pull", "remove"} {
 		t.Run(command, func(t *testing.T) {
 			stdout, _ := runTestApp(t, testRoot, env, command, "--help")
 			assertContains(t, stdout, "usage: git wt "+command)
@@ -437,44 +437,6 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	gitRun(t, env, trunk, "switch", "-c", "feature-in-trunk")
 	_, _, err = runTestAppError(task, configured, "pull")
 	assertErrorContains(t, err, "expected default branch \"main\"")
-}
-
-func TestBashShellInitCreatesAndEntersWorktree(t *testing.T) {
-	t.Parallel()
-
-	testRoot := t.TempDir()
-	destination := filepath.Join(testRoot, "worktree")
-	if err := os.Mkdir(destination, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	stdout, _ := runTestApp(t, testRoot, testEnvironment(t, testRoot), "shell-init", "bash")
-	assertContains(t, stdout, "cwt()")
-
-	script := stdout + `
-git() {
-    if [ "$1" = "wt" ] && [ "$2" = "new" ] && [ "$3" = "TASK-123" ]; then
-        return 0
-    fi
-    if [ "$1" = "wt" ] && [ "$2" = "path" ] && [ "$3" = "TASK-123" ]; then
-        printf '%s\n' "$CWT_TEST_DESTINATION"
-        return 0
-    fi
-    return 1
-}
-cwt new TASK-123 --base HEAD
-pwd -P
-`
-	command := exec.Command("bash", "--noprofile", "--norc")
-	command.Dir = testRoot
-	command.Env = envWith(os.Environ(), "CWT_TEST_DESTINATION", destination)
-	command.Stdin = strings.NewReader(script)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run generated bash integration: %v\n%s", err, output)
-	}
-	if got := strings.TrimSpace(string(output)); got != destination {
-		t.Fatalf("shell helper ended in %q, want %q", got, destination)
-	}
 }
 
 func TestNewUsesConfiguredBranchTemplateAndRefusesCollisions(t *testing.T) {

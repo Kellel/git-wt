@@ -16,7 +16,6 @@ Repository code and repository-specific instructions live in `trunk/` and the ta
 - Use `git wt pull` from anywhere in the project to fast-forward the clean `trunk/` default branch.
 - If an appropriate task worktree already exists, continue there.
 - Otherwise, default to creating one with `git wt new <task>`, then work from the path returned by `git wt path <task>`.
-- When the `cwt` shell helper is available, `cwt new <task>` creates the worktree and enters it in one step.
 - Keep `trunk/` stable; do not make task-specific changes there unless the user explicitly requests it.
 - Read-only inspection can use `trunk/` without creating a worktree.
 - Temporary agent working files, scratchpads, plans, and handoff notes may be placed in `notes/`. They are local and unmanaged; do not commit them.

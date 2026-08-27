@@ -49,10 +49,6 @@ func (a *App) Run(args []string) error {
 	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		return a.printUsage(a.out)
 	}
-	if args[0] == "shell-init" {
-		return a.runShellInit(args[1:])
-	}
-
 	cfg, err := a.loadConfig(overrides)
 	if err != nil {
 		return err
@@ -91,7 +87,6 @@ Commands:
   path        print a trunk, task, or notes path
   pull        fast-forward the project's trunk
   remove      safely remove a task worktree
-  shell-init  print shell integration
 
 Global options:
   --root <path>              workspace root (default: $HOME/code)

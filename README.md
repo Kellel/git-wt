@@ -96,33 +96,6 @@ The corresponding environment variables are `WT_ROOT`, `WT_NAMESPACE`, and
 `WT_BRANCH_TEMPLATE`. Global flags are `--root`, `--namespace`, and
 `--branch-template`.
 
-## Shell navigation
-
-A child process cannot change its parent shell directory. Load the Bash helper
-from `.bashrc` so creation and navigation can perform `cd` in the current shell:
-
-```bash
-eval "$(git wt shell-init bash)"
-```
-
-Then create and enter a task worktree in one command:
-
-```bash
-cwt new TASK-123-description
-cwt TASK-123-description
-cwt --notes
-```
-
-Optional shorthand Git aliases contain no workflow logic:
-
-```ini
-[alias]
-    wn = wt new
-    wp = wt pull
-    wl = wt list
-    wr = wt remove
-```
-
 ## Development
 
 The tests use real temporary Git repositories and local remotes; they do not
