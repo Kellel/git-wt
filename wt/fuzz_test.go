@@ -3,8 +3,6 @@
 package wt
 
 import (
-	"bytes"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -59,69 +57,5 @@ func FuzzProjectNameFromRemote(f *testing.F) {
 		if strings.ContainsAny(name, `/\\`) {
 			t.Fatalf("project name contains a path separator: %q", name)
 		}
-	})
-}
-
-func FuzzProjectKeyStaysWithinWorkspace(f *testing.F) {
-	for _, seed := range []string{
-		"team/example-api",
-		"personal/git-tools",
-		"../outside",
-		"team/../../outside",
-		"team/project\x00suffix",
-		"team/\u202eproject",
-		"",
-	} {
-		f.Add(seed)
-	}
-
-	f.Fuzz(func(t *testing.T, key string) {
-		const root = "/workspace"
-		project, err := projectForKey(config{root: root}, key)
-		if err != nil {
-			return
-		}
-		if err := ensureLexicallyWithin(root, project.root); err != nil {
-			t.Fatalf("accepted project escaped workspace: key=%q root=%q: %v", key, project.root, err)
-		}
-		relative, err := filepath.Rel(root, project.root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(strings.Split(filepath.ToSlash(relative), "/")) != 2 {
-			t.Fatalf("accepted project does not have two components: %q", relative)
-		}
-	})
-}
-
-func FuzzParseOptions(f *testing.F) {
-	for _, seed := range [][]byte{
-		[]byte("task"),
-		[]byte("--base\x00origin/main\x00task"),
-		[]byte("task\x00--branch=kellen/task"),
-		[]byte("--\x00--root\x00../../outside"),
-		[]byte("--unknown"),
-		bytes.Repeat([]byte{'a'}, 4096),
-	} {
-		f.Add(seed)
-	}
-
-	f.Fuzz(func(t *testing.T, input []byte) {
-		if len(input) > 64*1024 {
-			t.Skip()
-		}
-		parts := bytes.Split(input, []byte{0})
-		if len(parts) > 64 {
-			t.Skip()
-		}
-		args := make([]string, len(parts))
-		for i := range parts {
-			args[i] = string(parts[i])
-		}
-		var base, branch string
-		_, _, _ = parseOptions(args,
-			map[string]*string{"--base": &base, "--branch": &branch},
-			map[string]*bool{},
-		)
 	})
 }

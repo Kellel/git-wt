@@ -15,7 +15,5 @@ test:
 	go test -race ./...
 
 fuzz:
-	go test -tags=fuzz -run='^$$' -fuzz=FuzzParseWorktrees -fuzztime=30s -parallel=1 ./internal/wt
-	go test -tags=fuzz -run='^$$' -fuzz=FuzzProjectNameFromRemote -fuzztime=30s -parallel=1 ./internal/wt
-	go test -tags=fuzz -run='^$$' -fuzz=FuzzProjectKeyStaysWithinWorkspace -fuzztime=30s -parallel=1 ./internal/wt
-	go test -tags=fuzz -run='^$$' -fuzz=FuzzParseOptions -fuzztime=30s -parallel=1 ./internal/wt
+	go test -tags=fuzz -run='^$$' -fuzz=FuzzParseWorktrees -fuzztime=30s -parallel=1 ./wt
+	go test -tags=fuzz -run='^$$' -fuzz=FuzzProjectNameFromRemote -fuzztime=30s -parallel=1 ./wt

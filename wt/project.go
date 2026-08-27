@@ -18,7 +18,6 @@ type project struct {
 	worktrees string
 	notes     string
 	agents    string
-	key       string
 }
 
 type worktree struct {
@@ -48,26 +47,6 @@ func validateTask(task string) error {
 	return nil
 }
 
-func projectForKey(cfg config, key string) (project, error) {
-	parts := strings.Split(key, "/")
-	if len(parts) != 2 {
-		return project{}, fmt.Errorf("project %q must have the form <namespace>/<project>", key)
-	}
-	if err := validateComponent("namespace", parts[0]); err != nil {
-		return project{}, err
-	}
-	if err := validateComponent("project", parts[1]); err != nil {
-		return project{}, err
-	}
-	root := filepath.Join(cfg.root, parts[0], parts[1])
-	if err := ensureLexicallyWithin(cfg.root, root); err != nil {
-		return project{}, err
-	}
-	p := projectAtRoot(root)
-	p.key = key
-	return p, nil
-}
-
 func projectAtRoot(root string) project {
 	return project{
 		root:      root,
@@ -75,40 +54,25 @@ func projectAtRoot(root string) project {
 		worktrees: filepath.Join(root, "worktrees"),
 		notes:     filepath.Join(root, "notes"),
 		agents:    filepath.Join(root, "AGENTS.md"),
-		key:       filepath.Base(root),
 	}
 }
 
-func (a *App) resolveProject(cfg config, key string) (project, error) {
-	if key != "" {
-		p, err := projectForKey(cfg, key)
-		if err != nil {
-			return project{}, err
-		}
-		if err := ensureExistingWithin(cfg.root, p.root); err != nil {
-			return project{}, err
-		}
-		if err := a.validateProject(cfg, p); err != nil {
-			return project{}, err
-		}
-		return p, nil
-	}
-
+func (a *Manager) resolveProject() (project, error) {
 	if top, err := a.git.output(a.cwd, "rev-parse", "--path-format=absolute", "--show-toplevel"); err == nil {
-		p, err := a.projectFromWorktree(cfg, top)
+		p, err := a.projectFromWorktree(top)
 		if err != nil {
 			return project{}, err
 		}
-		if err := a.validateProject(cfg, p); err != nil {
+		if err := a.validateProject(p); err != nil {
 			return project{}, err
 		}
 		return p, nil
 	}
 
 	for candidate := filepath.Clean(a.cwd); ; candidate = filepath.Dir(candidate) {
-		p, err := a.projectFromRoot(cfg, candidate)
+		p, err := a.projectFromRoot(candidate)
 		if err == nil {
-			if err := a.validateProject(cfg, p); err == nil {
+			if err := a.validateProject(p); err == nil {
 				return p, nil
 			}
 		}
@@ -117,10 +81,10 @@ func (a *App) resolveProject(cfg config, key string) (project, error) {
 			break
 		}
 	}
-	return project{}, errors.New("current directory is not inside a managed project; use --project where supported")
+	return project{}, errors.New("current directory is not inside a managed project")
 }
 
-func (a *App) projectFromWorktree(cfg config, top string) (project, error) {
+func (a *Manager) projectFromWorktree(top string) (project, error) {
 	top, err := absolutePath(a.cwd, top)
 	if err != nil {
 		return project{}, err
@@ -134,26 +98,18 @@ func (a *App) projectFromWorktree(cfg config, top string) (project, error) {
 	} else {
 		return project{}, fmt.Errorf("git checkout %s does not follow the managed trunk/worktrees layout", top)
 	}
-	return a.projectFromRoot(cfg, root)
+	return a.projectFromRoot(root)
 }
 
-func (a *App) projectFromRoot(cfg config, root string) (project, error) {
+func (a *Manager) projectFromRoot(root string) (project, error) {
 	root, err := absolutePath(a.cwd, root)
 	if err != nil {
 		return project{}, err
 	}
-	p := projectAtRoot(root)
-	relative, err := filepath.Rel(cfg.root, root)
-	if err == nil {
-		parts := strings.Split(filepath.ToSlash(relative), "/")
-		if len(parts) == 2 && validateComponent("namespace", parts[0]) == nil && validateComponent("project", parts[1]) == nil {
-			p.key = parts[0] + "/" + parts[1]
-		}
-	}
-	return p, nil
+	return projectAtRoot(root), nil
 }
 
-func (a *App) validateProject(_ config, p project) error {
+func (a *Manager) validateProject(p project) error {
 	for name, path := range map[string]string{
 		"project root": p.root,
 		"trunk":        p.trunk,
@@ -188,35 +144,6 @@ func (a *App) validateProject(_ config, p project) error {
 	expected := filepath.Join(p.trunk, ".git")
 	if !sameResolvedPath(common, expected) {
 		return fmt.Errorf("invalid managed project %s: trunk uses git directory %s, expected %s", p.root, common, expected)
-	}
-	return nil
-}
-
-func ensureLexicallyWithin(root, path string) error {
-	relative, err := filepath.Rel(root, path)
-	if err != nil {
-		return fmt.Errorf("compare %s with workspace root %s: %w", path, root, err)
-	}
-	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return fmt.Errorf("path %s is outside workspace root %s", path, root)
-	}
-	return nil
-}
-
-func ensureExistingWithin(root, path string) error {
-	if err := ensureLexicallyWithin(root, path); err != nil {
-		return err
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return fmt.Errorf("resolve workspace root %s: %w", root, err)
-	}
-	resolvedPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return fmt.Errorf("resolve path %s: %w", path, err)
-	}
-	if err := ensureLexicallyWithin(resolvedRoot, resolvedPath); err != nil {
-		return fmt.Errorf("resolved path escapes workspace root: %w", err)
 	}
 	return nil
 }
@@ -280,7 +207,7 @@ func parseWorktrees(output []byte) ([]worktree, error) {
 	return result, nil
 }
 
-func (a *App) projectWorktrees(p project, includeDirty bool) ([]worktree, error) {
+func (a *Manager) projectWorktrees(p project, includeDirty bool) ([]worktree, error) {
 	output, err := a.git.run(p.trunk, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return nil, err
@@ -291,7 +218,7 @@ func (a *App) projectWorktrees(p project, includeDirty bool) ([]worktree, error)
 	}
 	if includeDirty {
 		for i := range worktrees {
-			status, err := a.git.run(worktrees[i].path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+			status, err := a.git.run(worktrees[i].path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
 			if err != nil {
 				return nil, fmt.Errorf("inspect worktree %s: %w", worktrees[i].path, err)
 			}
@@ -311,7 +238,7 @@ func worktreeTask(p project, path string) string {
 	return "external:" + filepath.Base(path)
 }
 
-func (a *App) activeGitOperation(path string) (string, error) {
+func (a *Manager) activeGitOperation(path string) (string, error) {
 	markers := []string{
 		"index.lock",
 		"MERGE_HEAD",
@@ -336,7 +263,7 @@ func (a *App) activeGitOperation(path string) (string, error) {
 	return "", nil
 }
 
-func (a *App) defaultBase(p project) (string, error) {
+func (a *Manager) defaultBase(p project) (string, error) {
 	ref, err := a.git.output(p.trunk, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 	if err != nil {
 		return "", errors.New("cannot determine origin's default branch; pass --base explicitly")

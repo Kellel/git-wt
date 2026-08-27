@@ -11,6 +11,32 @@ import (
 	"testing"
 )
 
+var gitWTTestBinary string
+
+func TestMain(m *testing.M) {
+	temporary, err := os.MkdirTemp("", "git-wt-integration-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	gitWTTestBinary = filepath.Join(temporary, "git-wt")
+	build := exec.Command("go", "build", "-o", gitWTTestBinary, "../cmd/git-wt")
+	if output, err := build.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "build git-wt test binary: %v\n%s", err, output)
+		_ = os.RemoveAll(temporary)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	if err := os.RemoveAll(temporary); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.Exit(code)
+}
+
 func TestCloneNewListPathAndRemove(t *testing.T) {
 	t.Parallel()
 
@@ -18,12 +44,14 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	stdout, _ := runTestApp(t, testRoot, env,
-		"--root", workspace,
-		"clone", remote, "team/demo",
+	stdout, _ := runTestCLI(t, workspace, env,
+		"clone", remote,
 	)
-	projectRoot := filepath.Join(workspace, "team", "demo")
+	projectRoot := filepath.Join(workspace, "remote")
 	trunk := filepath.Join(projectRoot, "trunk")
 	worktrees := filepath.Join(projectRoot, "worktrees")
 	notes := filepath.Join(projectRoot, "notes")
@@ -32,16 +60,14 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	assertDirectory(t, worktrees)
 	assertDirectory(t, notes)
 
-	stdout, _ = runTestApp(t, testRoot, env,
-		"--root", workspace,
-		"path", "--project", "team/demo",
+	stdout, _ = runTestCLI(t, projectRoot, env,
+		"path",
 	)
 	if got := strings.TrimSpace(stdout); got != trunk {
 		t.Fatalf("trunk path = %q, want %q", got, trunk)
 	}
-	stdout, _ = runTestApp(t, testRoot, env,
-		"--root", workspace,
-		"path", "--notes", "--project", "team/demo",
+	stdout, _ = runTestCLI(t, projectRoot, env,
+		"path", "--notes",
 	)
 	if got := strings.TrimSpace(stdout); got != notes {
 		t.Fatalf("notes path = %q, want %q", got, notes)
@@ -54,7 +80,7 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	if err := os.Mkdir(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _ = runTestApp(t, nested, envWith(env, "WT_ROOT", workspace),
+	stdout, _ = runTestCLI(t, nested, env,
 		"new", "TASK-123-example",
 	)
 	taskPath := filepath.Join(worktrees, "TASK-123-example")
@@ -67,7 +93,7 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 		t.Fatalf("task branch = %q", got)
 	}
 
-	stdout, _ = runTestApp(t, taskPath, envWith(env, "WT_ROOT", workspace), "path", "TASK-123-example")
+	stdout, _ = runTestCLI(t, taskPath, env, "path", "TASK-123-example")
 	if got := strings.TrimSpace(stdout); got != taskPath {
 		t.Fatalf("task path = %q, want %q", got, taskPath)
 	}
@@ -77,23 +103,23 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	if err := os.Rename(remote, offlineRemote); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _ = runTestApp(t, projectRoot, envWith(env, "WT_ROOT", workspace), "list")
+	stdout, _ = runTestCLI(t, projectRoot, env, "list")
 	assertContains(t, stdout, "TASK-123-example")
 	assertContains(t, stdout, "trunk")
 	assertContains(t, stdout, "no")
 
 	writeFile(t, filepath.Join(taskPath, "untracked.txt"), "do not lose\n")
-	stdout, _ = runTestApp(t, projectRoot, envWith(env, "WT_ROOT", workspace), "list")
+	stdout, _ = runTestCLI(t, projectRoot, env, "list")
 	assertContains(t, stdout, "TASK-123-example")
 	assertContains(t, stdout, "yes")
 
-	stdout, _ = runTestApp(t, projectRoot, envWith(env, "WT_ROOT", workspace), "list", "--porcelain")
+	stdout, _ = runTestCLI(t, projectRoot, env, "list", "--porcelain")
 	if !bytes.Contains([]byte(stdout), []byte("task TASK-123-example\x00")) ||
 		!bytes.Contains([]byte(stdout), []byte("dirty true\x00")) {
 		t.Fatalf("porcelain output missing task or dirty state: %q", stdout)
 	}
 
-	_, _, err := runTestAppError(projectRoot, envWith(env, "WT_ROOT", workspace), "remove", "TASK-123-example")
+	_, _, err := runTestCLIError(projectRoot, env, "remove", "TASK-123-example")
 	assertErrorContains(t, err, "refusing to remove dirty task worktree")
 	assertDirectory(t, taskPath)
 	if got := readFile(t, filepath.Join(taskPath, "untracked.txt")); got != "do not lose\n" {
@@ -104,12 +130,15 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(taskPath, "tracked.txt"), "modified\n")
-	_, _, err = runTestAppError(projectRoot, envWith(env, "WT_ROOT", workspace), "remove", "TASK-123-example")
+	_, _, err = runTestCLIError(projectRoot, env, "remove", "TASK-123-example")
 	assertErrorContains(t, err, "refusing to remove dirty task worktree")
 	assertDirectory(t, taskPath)
 	gitRun(t, env, taskPath, "restore", "tracked.txt")
 	writeFile(t, filepath.Join(taskPath, "ignored.txt"), "ignored build output\n")
-	_, _, err = runTestAppError(projectRoot, envWith(env, "WT_ROOT", workspace), "remove", "TASK-123-example")
+	stdout, _ = runTestCLI(t, projectRoot, env, "list")
+	assertContains(t, stdout, "TASK-123-example")
+	assertContains(t, stdout, "yes")
+	_, _, err = runTestCLIError(projectRoot, env, "remove", "TASK-123-example")
 	assertErrorContains(t, err, "refusing to remove dirty task worktree")
 	if got := readFile(t, filepath.Join(taskPath, "ignored.txt")); got != "ignored build output\n" {
 		t.Fatalf("ignored file changed: %q", got)
@@ -117,7 +146,7 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	if err := os.Remove(filepath.Join(taskPath, "ignored.txt")); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _ = runTestApp(t, projectRoot, envWith(env, "WT_ROOT", workspace),
+	stdout, _ = runTestCLI(t, projectRoot, env,
 		"remove", "TASK-123-example", "--delete-branch",
 	)
 	assertContains(t, stdout, "Removed task worktree and branch TASK-123-example")
@@ -158,7 +187,7 @@ func TestAdoptPreservesCompleteCheckout(t *testing.T) {
 	reflogBefore := gitOutputRaw(t, env, source, "reflog", "show", "--all", "--format=%H%x00%gs")
 	hookBefore := readFile(t, filepath.Join(source, ".git", "hooks", "pre-commit"))
 
-	stdout, _ := runTestApp(t, nested, env,
+	stdout, _ := runTestCLI(t, nested, env,
 		"adopt", "--dry-run",
 	)
 	assertContains(t, stdout, "Source: "+source)
@@ -168,7 +197,7 @@ func TestAdoptPreservesCompleteCheckout(t *testing.T) {
 	assertNotExist(t, filepath.Join(source, "worktrees"))
 	assertNotExist(t, filepath.Join(source, "notes"))
 
-	stdout, stderr := runTestApp(t, nested, env,
+	stdout, stderr := runTestCLI(t, nested, env,
 		"adopt",
 	)
 	trunk := filepath.Join(source, "trunk")
@@ -201,9 +230,9 @@ func TestAdoptPreservesCompleteCheckout(t *testing.T) {
 	}
 
 	// An adopted repository without origin requires an explicit base.
-	_, _, err := runTestAppError(trunk, env, "new", "local-task")
+	_, _, err := runTestCLIError(trunk, env, "new", "local-task")
 	assertErrorContains(t, err, "pass --base explicitly")
-	runTestApp(t, trunk, env, "new", "local-task", "--base", "HEAD")
+	runTestCLI(t, trunk, env, "new", "local-task", "--base", "HEAD")
 	assertDirectory(t, filepath.Join(source, "worktrees", "local-task"))
 }
 
@@ -214,7 +243,7 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		testRoot := t.TempDir()
 		env := testEnvironment(t, testRoot)
 
-		_, _, err := runTestAppError(testRoot, env,
+		_, _, err := runTestCLIError(testRoot, env,
 			"adopt",
 		)
 		assertErrorContains(t, err, "must be run inside a Git checkout")
@@ -228,7 +257,7 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		linked := filepath.Join(testRoot, "linked")
 		gitRun(t, env, source, "worktree", "add", "-b", "linked", linked, "HEAD")
 
-		_, _, err := runTestAppError(testRoot, env,
+		_, _, err := runTestCLIError(testRoot, env,
 			"adopt", source,
 		)
 		assertErrorContains(t, err, "already has linked worktrees")
@@ -243,7 +272,7 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		linked := filepath.Join(testRoot, "linked")
 		gitRun(t, env, source, "worktree", "add", "-b", "linked", linked, "HEAD")
 
-		_, _, err := runTestAppError(testRoot, env,
+		_, _, err := runTestCLIError(testRoot, env,
 			"adopt", linked,
 		)
 		assertErrorContains(t, err, ".git is not a directory")
@@ -259,7 +288,7 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, _, err := runTestAppError(testRoot, env,
+		_, _, err := runTestCLIError(testRoot, env,
 			"adopt", source,
 		)
 		assertErrorContains(t, err, "reserved path already exists")
@@ -273,7 +302,7 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		initRepository(t, source, env)
 		writeFile(t, filepath.Join(source, ".git", "MERGE_HEAD"), strings.Repeat("0", 40)+"\n")
 
-		_, _, err := runTestAppError(testRoot, env,
+		_, _, err := runTestCLIError(testRoot, env,
 			"adopt", source,
 		)
 		assertErrorContains(t, err, "Git operation marker MERGE_HEAD")
@@ -285,9 +314,10 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		env := testEnvironment(t, testRoot)
 		source := filepath.Join(testRoot, "source")
 		initRepository(t, source, env)
-		app, _, _ := newTestApp(testRoot, env)
-		app.rename = func(string, string) error { return errors.New("injected rename failure") }
-		err := app.Run([]string{"adopt", source})
+		manager, _, _ := newTestManagerWithRename(testRoot, env, func(string, string) error {
+			return errors.New("injected rename failure")
+		})
+		err := manager.Adopt(source, false)
 		assertErrorContains(t, err, "source left unchanged")
 		assertDirectory(t, source)
 	})
@@ -297,16 +327,15 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		env := testEnvironment(t, testRoot)
 		source := filepath.Join(testRoot, "source")
 		initRepository(t, source, env)
-		app, _, _ := newTestApp(testRoot, env)
 		calls := 0
-		app.rename = func(oldPath, newPath string) error {
+		manager, _, _ := newTestManagerWithRename(testRoot, env, func(oldPath, newPath string) error {
 			calls++
 			if calls == 2 {
 				return errors.New("injected rename failure")
 			}
 			return os.Rename(oldPath, newPath)
-		}
-		err := app.Run([]string{"adopt", source})
+		})
+		err := manager.Adopt(source, false)
 		assertErrorContains(t, err, "source restored")
 		assertDirectory(t, source)
 		assertDirectory(t, filepath.Join(source, ".git"))
@@ -329,42 +358,40 @@ func TestCloneDerivesProjectAndReportsPartialFailure(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	configured := envWith(env, "WT_ROOT", workspace, "WT_NAMESPACE", "personal")
-	runTestApp(t, testRoot, configured, "clone", remote)
-	projectRoot := filepath.Join(workspace, "personal", "remote")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runTestCLI(t, workspace, env, "clone", remote)
+	projectRoot := filepath.Join(workspace, "remote")
 	assertDirectory(t, filepath.Join(projectRoot, "trunk"))
 	assertContains(t, readFile(t, filepath.Join(projectRoot, "AGENTS.md")), "This directory is managed by `git wt`")
 
 	missingRemote := filepath.Join(testRoot, "missing.git")
-	_, _, err := runTestAppError(testRoot, configured, "clone", missingRemote, "personal/broken")
+	_, _, err := runTestCLIError(workspace, env, "clone", missingRemote, "broken")
 	assertErrorContains(t, err, "partial project remains")
-	assertDirectory(t, filepath.Join(workspace, "personal", "broken", "worktrees"))
-	assertDirectory(t, filepath.Join(workspace, "personal", "broken", "notes"))
+	assertDirectory(t, filepath.Join(workspace, "broken", "worktrees"))
+	assertDirectory(t, filepath.Join(workspace, "broken", "notes"))
 }
 
-func TestCloneRejectsNamespaceSymlinkEscapingWorkspace(t *testing.T) {
+func TestCloneRefusesExistingDestination(t *testing.T) {
 	t.Parallel()
 
 	testRoot := t.TempDir()
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	outside := filepath.Join(testRoot, "outside")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(outside, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(workspace, "team")); err != nil {
+	destination := filepath.Join(workspace, "demo")
+	if err := os.Mkdir(destination, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, err := runTestAppError(testRoot, envWith(env, "WT_ROOT", workspace),
-		"clone", remote, "team/demo",
+	_, _, err := runTestCLIError(workspace, env,
+		"clone", remote, "demo",
 	)
-	assertErrorContains(t, err, "resolves outside workspace root")
-	assertNotExist(t, filepath.Join(outside, "demo"))
+	assertErrorContains(t, err, "destination project already exists")
 }
 
 func TestRemoveWithoutBranchDeletionRetainsBranch(t *testing.T) {
@@ -374,12 +401,12 @@ func TestRemoveWithoutBranchDeletionRetainsBranch(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	configured := envWith(env, "WT_ROOT", workspace)
-	runTestApp(t, testRoot, configured, "clone", remote, "team/demo")
-	trunk := filepath.Join(workspace, "team", "demo", "trunk")
-	runTestApp(t, trunk, configured, "new", "retained")
-	runTestApp(t, trunk, configured, "remove", "retained")
-	assertNotExist(t, filepath.Join(workspace, "team", "demo", "worktrees", "retained"))
+	projectRoot := filepath.Join(workspace, "demo")
+	runTestCLI(t, testRoot, env, "clone", remote, projectRoot)
+	trunk := filepath.Join(projectRoot, "trunk")
+	runTestCLI(t, trunk, env, "new", "retained")
+	runTestCLI(t, trunk, env, "remove", "retained")
+	assertNotExist(t, filepath.Join(projectRoot, "worktrees", "retained"))
 	if code := gitExit(t, env, trunk, "show-ref", "--verify", "--quiet", "refs/heads/retained"); code != 0 {
 		t.Fatalf("retained branch show-ref exit = %d, want 0", code)
 	}
@@ -392,10 +419,29 @@ func TestEveryCommandProvidesHelp(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	for _, command := range []string{"clone", "adopt", "new", "list", "path", "pull", "remove"} {
 		t.Run(command, func(t *testing.T) {
-			stdout, _ := runTestApp(t, testRoot, env, command, "--help")
-			assertContains(t, stdout, "usage: git wt "+command)
+			stdout, _ := runTestCLI(t, testRoot, env, command, "--help")
+			assertContains(t, stdout, "Usage:\n  git wt "+command)
 		})
 	}
+}
+
+func TestCobraRejectsInvalidSyntax(t *testing.T) {
+	t.Parallel()
+
+	testRoot := t.TempDir()
+	env := testEnvironment(t, testRoot)
+
+	_, _, err := runTestCLIError(testRoot, env, "list", "--unknown")
+	assertErrorContains(t, err, "unknown flag: --unknown")
+
+	_, _, err = runTestCLIError(testRoot, env, "pull", "extra")
+	assertErrorContains(t, err, "unknown command \"extra\" for \"git wt pull\"")
+
+	_, _, err = runTestCLIError(testRoot, env, "path", "task", "--notes")
+	assertErrorContains(t, err, "--notes cannot be combined with a task")
+
+	_, _, err = runTestCLIError(testRoot, env, "path", "--", "--notes")
+	assertErrorContains(t, err, "current directory is not inside a managed project")
 }
 
 func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
@@ -405,12 +451,12 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	configured := envWith(env, "WT_ROOT", workspace)
-	runTestApp(t, testRoot, configured, "clone", remote, "team/demo")
+	projectRoot := filepath.Join(workspace, "demo")
+	runTestCLI(t, testRoot, env, "clone", remote, projectRoot)
 
-	trunk := filepath.Join(workspace, "team", "demo", "trunk")
-	runTestApp(t, trunk, configured, "new", "TASK-123")
-	task := filepath.Join(workspace, "team", "demo", "worktrees", "TASK-123")
+	trunk := filepath.Join(projectRoot, "trunk")
+	runTestCLI(t, trunk, env, "new", "TASK-123")
+	task := filepath.Join(projectRoot, "worktrees", "TASK-123")
 
 	seed := filepath.Join(testRoot, "seed")
 	writeFile(t, filepath.Join(seed, "tracked.txt"), "upstream update\n")
@@ -418,7 +464,7 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	gitRun(t, env, seed, "commit", "-m", "upstream update")
 	gitRun(t, env, seed, "push", "origin", "main")
 
-	stdout, _ := runTestApp(t, task, configured, "pull")
+	stdout, _ := runTestCLI(t, task, env, "pull")
 	assertContains(t, stdout, "Trunk: "+trunk)
 	assertContains(t, stdout, "Branch: main")
 	assertContains(t, stdout, "Updated trunk main:")
@@ -430,12 +476,12 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	}
 
 	writeFile(t, filepath.Join(trunk, "tracked.txt"), "dirty trunk\n")
-	_, _, err := runTestAppError(task, configured, "pull")
+	_, _, err := runTestCLIError(task, env, "pull")
 	assertErrorContains(t, err, "refusing to pull into dirty trunk")
 	gitRun(t, env, trunk, "restore", "tracked.txt")
 
 	gitRun(t, env, trunk, "switch", "-c", "feature-in-trunk")
-	_, _, err = runTestAppError(task, configured, "pull")
+	_, _, err = runTestCLIError(task, env, "pull")
 	assertErrorContains(t, err, "expected default branch \"main\"")
 }
 
@@ -446,22 +492,29 @@ func TestNewUsesConfiguredBranchTemplateAndRefusesCollisions(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	runTestApp(t, testRoot, env,
-		"--root", workspace, "clone", remote, "team/demo",
-	)
-	trunk := filepath.Join(workspace, "team", "demo", "trunk")
-	configured := envWith(env, "WT_ROOT", workspace, "WT_BRANCH_TEMPLATE", "kellen/%s")
-	runTestApp(t, trunk, configured, "new", "TASK-9-name")
-	taskPath := filepath.Join(workspace, "team", "demo", "worktrees", "TASK-9-name")
+	projectRoot := filepath.Join(workspace, "demo")
+	runTestCLI(t, testRoot, env, "clone", remote, projectRoot)
+	trunk := filepath.Join(projectRoot, "trunk")
+	configured := envWith(env, "WT_BRANCH_TEMPLATE", "kellen/%s")
+	runTestCLI(t, trunk, configured, "new", "TASK-9-name")
+	taskPath := filepath.Join(projectRoot, "worktrees", "TASK-9-name")
 	if got := gitOutput(t, env, taskPath, "branch", "--show-current"); got != "kellen/TASK-9-name" {
 		t.Fatalf("branch = %q", got)
 	}
+	runTestCLI(t, trunk, env, "new", "--branch-template", "before/%s", "flag-before")
+	if got := gitOutput(t, env, filepath.Join(projectRoot, "worktrees", "flag-before"), "branch", "--show-current"); got != "before/flag-before" {
+		t.Fatalf("branch from flag before positional argument = %q", got)
+	}
+	runTestCLI(t, trunk, env, "new", "flag-after", "--branch-template", "after/%s")
+	if got := gitOutput(t, env, filepath.Join(projectRoot, "worktrees", "flag-after"), "branch", "--show-current"); got != "after/flag-after" {
+		t.Fatalf("branch from flag after positional argument = %q", got)
+	}
 
-	_, _, err := runTestAppError(trunk, configured, "new", "TASK-9-name")
+	_, _, err := runTestCLIError(trunk, configured, "new", "TASK-9-name")
 	assertErrorContains(t, err, "task destination already exists")
-	_, _, err = runTestAppError(trunk, configured, "new", "bad/task")
+	_, _, err = runTestCLIError(trunk, configured, "new", "bad/task")
 	assertErrorContains(t, err, "invalid task")
-	_, _, err = runTestAppError(trunk, configured, "new", "another", "--branch", "kellen/TASK-9-name")
+	_, _, err = runTestCLIError(trunk, configured, "new", "another", "--branch", "kellen/TASK-9-name")
 	assertErrorContains(t, err, "already exists")
 }
 
@@ -472,18 +525,18 @@ func TestRemoveRefusesUnmergedBranchAndActiveOperation(t *testing.T) {
 	env := testEnvironment(t, testRoot)
 	remote := createRemote(t, testRoot, env)
 	workspace := filepath.Join(testRoot, "workspace")
-	runTestApp(t, testRoot, env, "--root", workspace, "clone", remote, "team/demo")
-	trunk := filepath.Join(workspace, "team", "demo", "trunk")
+	projectRoot := filepath.Join(workspace, "demo")
+	runTestCLI(t, testRoot, env, "clone", remote, projectRoot)
+	trunk := filepath.Join(projectRoot, "trunk")
 	gitRun(t, env, trunk, "config", "user.name", "Git WT Tests")
 	gitRun(t, env, trunk, "config", "user.email", "git-wt@example.invalid")
-	configured := envWith(env, "WT_ROOT", workspace)
-	runTestApp(t, trunk, configured, "new", "unmerged")
-	taskPath := filepath.Join(workspace, "team", "demo", "worktrees", "unmerged")
+	runTestCLI(t, trunk, env, "new", "unmerged")
+	taskPath := filepath.Join(projectRoot, "worktrees", "unmerged")
 	writeFile(t, filepath.Join(taskPath, "feature.txt"), "feature\n")
 	gitRun(t, env, taskPath, "add", "feature.txt")
 	gitRun(t, env, taskPath, "commit", "-m", "feature")
 
-	_, _, err := runTestAppError(trunk, configured, "remove", "unmerged", "--delete-branch")
+	_, _, err := runTestCLIError(trunk, env, "remove", "unmerged", "--delete-branch")
 	assertErrorContains(t, err, "refusing to delete unmerged branch")
 	assertDirectory(t, taskPath)
 
@@ -495,7 +548,7 @@ func TestRemoveRefusesUnmergedBranchAndActiveOperation(t *testing.T) {
 	if err := os.Remove(filepath.Join(taskPath, ".git-operation-placeholder")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = runTestAppError(trunk, configured, "remove", "unmerged")
+	_, _, err = runTestCLIError(trunk, env, "remove", "unmerged")
 	assertErrorContains(t, err, "active Git operation marker rebase-merge")
 	assertDirectory(t, taskPath)
 }
@@ -506,56 +559,59 @@ func TestConfigurationPrecedence(t *testing.T) {
 	testRoot := t.TempDir()
 	globalConfig := filepath.Join(testRoot, "gitconfig")
 	env := envWith(testEnvironment(t, testRoot), "GIT_CONFIG_GLOBAL", globalConfig)
-	gitRunNoDir(t, env, "config", "--global", "wt.root", filepath.Join(testRoot, "from-git"))
-	gitRunNoDir(t, env, "config", "--global", "wt.namespace", "from-git")
 	gitRunNoDir(t, env, "config", "--global", "wt.branchTemplate", "git/%s")
 
-	app, _, _ := newTestApp(testRoot, env)
-	cfg, err := app.loadConfig(configOverrides{})
+	manager, _, _ := newTestManager(testRoot, env)
+	cfg, err := manager.loadConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.namespace != "from-git" || cfg.branchTemplate != "git/%s" {
+	if cfg.branchTemplate != "git/%s" {
 		t.Fatalf("git config not loaded: %+v", cfg)
 	}
 
-	env = envWith(env,
-		"WT_ROOT", filepath.Join(testRoot, "from-env"),
-		"WT_NAMESPACE", "from-env",
-		"WT_BRANCH_TEMPLATE", "env/%s",
-	)
-	app, _, _ = newTestApp(testRoot, env)
-	cfg, err = app.loadConfig(configOverrides{
-		root:           filepath.Join(testRoot, "from-flag"),
-		namespace:      "from-flag",
-		branchTemplate: "flag/%s",
-	})
+	env = envWith(env, "WT_BRANCH_TEMPLATE", "env/%s")
+	manager, _, _ = newTestManager(testRoot, env)
+	cfg, err = manager.loadConfig("flag/%s")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.root != filepath.Join(testRoot, "from-flag") || cfg.namespace != "from-flag" || cfg.branchTemplate != "flag/%s" {
+	if cfg.branchTemplate != "flag/%s" {
 		t.Fatalf("flag precedence failed: %+v", cfg)
 	}
 }
 
-func runTestApp(t *testing.T, cwd string, env []string, args ...string) (string, string) {
+func runTestCLI(t *testing.T, cwd string, env []string, args ...string) (string, string) {
 	t.Helper()
-	stdout, stderr, err := runTestAppError(cwd, env, args...)
+	stdout, stderr, err := runTestCLIError(cwd, env, args...)
 	if err != nil {
 		t.Fatalf("git wt %s failed: %v\nstdout: %s\nstderr: %s", strings.Join(args, " "), err, stdout, stderr)
 	}
 	return stdout, stderr
 }
 
-func runTestAppError(cwd string, env []string, args ...string) (string, string, error) {
-	app, stdout, stderr := newTestApp(cwd, env)
-	err := app.Run(args)
+func runTestCLIError(cwd string, env []string, args ...string) (string, string, error) {
+	var stdout, stderr bytes.Buffer
+	command := exec.Command(gitWTTestBinary, args...)
+	command.Dir = cwd
+	command.Env = env
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	if err != nil && stderr.Len() != 0 {
+		err = errors.New(strings.TrimSpace(stderr.String()))
+	}
 	return stdout.String(), stderr.String(), err
 }
 
-func newTestApp(cwd string, env []string) (*App, *bytes.Buffer, *bytes.Buffer) {
+func newTestManager(cwd string, env []string) (*Manager, *bytes.Buffer, *bytes.Buffer) {
 	var stdout, stderr bytes.Buffer
-	return New(cwd, env, &stdout, &stderr), &stdout, &stderr
+	return NewManager(cwd, env, &stdout, &stderr), &stdout, &stderr
+}
+
+func newTestManagerWithRename(cwd string, env []string, rename func(string, string) error) (*Manager, *bytes.Buffer, *bytes.Buffer) {
+	var stdout, stderr bytes.Buffer
+	return newManagerWithRename(cwd, env, &stdout, &stderr, rename), &stdout, &stderr
 }
 
 func testEnvironment(t *testing.T, root string) []string {
@@ -710,9 +766,4 @@ func assertErrorContains(t *testing.T, err error, substring string) {
 	if err == nil || !strings.Contains(err.Error(), substring) {
 		t.Fatalf("error %v does not contain %q", err, substring)
 	}
-}
-
-func ExampleApp_Run() {
-	fmt.Println("git wt path --project team/example-api")
-	// Output: git wt path --project team/example-api
 }

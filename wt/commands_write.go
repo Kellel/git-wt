@@ -8,42 +8,25 @@ import (
 	"strings"
 )
 
-func (a *App) runClone(cfg config, args []string) error {
-	positional, help, err := parseOptions(args, nil, nil)
-	if err != nil {
-		return err
-	}
-	if help {
-		_, err := fmt.Fprintln(a.out, "usage: git wt clone <remote> [<namespace>/<project>]")
-		return err
-	}
-	if len(positional) < 1 || len(positional) > 2 {
-		return errorsForUsage("clone requires a remote and an optional project key")
-	}
-
-	remote := positional[0]
-	key := ""
-	if len(positional) == 2 {
-		key = positional[1]
-	} else {
-		if cfg.namespace == "" {
-			return errors.New("clone requires <namespace>/<project> when no default namespace is configured")
-		}
+// Clone creates a managed project containing a clone of remote.
+func (a *Manager) Clone(remote, destination string) error {
+	if destination == "" {
 		name, err := projectNameFromRemote(remote)
 		if err != nil {
 			return err
 		}
-		key = cfg.namespace + "/" + name
+		destination = name
 	}
-	p, err := projectForKey(cfg, key)
+	root, err := absolutePath(a.cwd, destination)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve destination: %w", err)
 	}
-	if err := validateNewProjectPath(cfg.root, p.root); err != nil {
+	p := projectAtRoot(root)
+	if err := validateNewProjectPath(p.root); err != nil {
 		return err
 	}
 
-	if _, err := fmt.Fprintf(a.out, "Project: %s\nRemote: %s\nDestination: %s\n", p.key, remote, p.trunk); err != nil {
+	if _, err := fmt.Fprintf(a.out, "Remote: %s\nProject root: %s\nTrunk: %s\n", remote, p.root, p.trunk); err != nil {
 		return err
 	}
 	created, err := createProjectSkeleton(p)
@@ -57,28 +40,16 @@ func (a *App) runClone(cfg config, args []string) error {
 	return err
 }
 
-func (a *App) runAdopt(_ config, args []string) error {
-	var dryRun bool
-	positional, help, err := parseOptions(args, nil, map[string]*bool{"--dry-run": &dryRun})
-	if err != nil {
-		return err
-	}
-	if help {
-		_, err := fmt.Fprintln(a.out, "usage: git wt adopt [<source>] [--dry-run]")
-		return err
-	}
-	if len(positional) > 1 {
-		return errorsForUsage("adopt accepts at most one source")
-	}
-
-	var source string
-	if len(positional) == 0 {
+// Adopt converts a standalone checkout into a managed project in place.
+func (a *Manager) Adopt(source string, dryRun bool) error {
+	var err error
+	if source == "" {
 		source, err = a.git.output(a.cwd, "rev-parse", "--path-format=absolute", "--show-toplevel")
 		if err != nil {
 			return errors.New("adopt must be run inside a Git checkout or given an explicit source")
 		}
 	} else {
-		source, err = absolutePath(a.cwd, positional[0])
+		source, err = absolutePath(a.cwd, source)
 		if err != nil {
 			return fmt.Errorf("resolve source: %w", err)
 		}
@@ -158,7 +129,7 @@ func createInPlaceProjectSkeleton(p project) ([]string, error) {
 	return created, nil
 }
 
-func (a *App) rollbackAdoption(source, temporary string, created []string, cause error) error {
+func (a *Manager) rollbackAdoption(source, temporary string, created []string, cause error) error {
 	rollbackEmptyDirectories(created)
 	if err := a.rename(temporary, source); err != nil {
 		return fmt.Errorf("adoption failed: %v; rollback also failed: checkout remains at %s: %w", cause, temporary, err)
@@ -166,7 +137,7 @@ func (a *App) rollbackAdoption(source, temporary string, created []string, cause
 	return fmt.Errorf("adoption failed; source restored at %s: %w", source, cause)
 }
 
-func (a *App) validateAdoption(source string, p project) error {
+func (a *Manager) validateAdoption(source string, p project) error {
 	info, err := os.Stat(source)
 	if err != nil {
 		return fmt.Errorf("inspect source %s: %w", source, err)
@@ -218,26 +189,16 @@ func (a *App) validateAdoption(source string, p project) error {
 	return nil
 }
 
-func (a *App) runNew(cfg config, args []string) error {
-	var branch, base string
-	positional, help, err := parseOptions(args,
-		map[string]*string{"--branch": &branch, "--base": &base}, nil,
-	)
+// NewWorktree creates a task worktree and its branch.
+func (a *Manager) NewWorktree(task string, options NewOptions) error {
+	cfg, err := a.loadConfig(options.BranchTemplate)
 	if err != nil {
 		return err
 	}
-	if help {
-		_, err := fmt.Fprintln(a.out, "usage: git wt new <task> [--branch <name>] [--base <ref>]")
-		return err
-	}
-	if len(positional) != 1 {
-		return errorsForUsage("new requires exactly one task")
-	}
-	task := positional[0]
 	if err := validateTask(task); err != nil {
 		return err
 	}
-	p, err := a.resolveProject(cfg, "")
+	p, err := a.resolveProject()
 	if err != nil {
 		return err
 	}
@@ -257,12 +218,14 @@ func (a *App) runNew(cfg config, args []string) error {
 		}
 	}
 
+	branch := options.Branch
 	if branch == "" {
 		branch = strings.ReplaceAll(cfg.branchTemplate, "%s", task)
 	}
 	if _, err := a.git.run(p.trunk, "check-ref-format", "--branch", branch); err != nil {
 		return fmt.Errorf("invalid branch name %q: %w", branch, err)
 	}
+	base := options.Base
 	if base == "" {
 		base, err = a.defaultBase(p)
 		if err != nil {
@@ -288,20 +251,9 @@ func (a *App) runNew(cfg config, args []string) error {
 	return err
 }
 
-func (a *App) runPull(cfg config, args []string) error {
-	positional, help, err := parseOptions(args, nil, nil)
-	if err != nil {
-		return err
-	}
-	if help {
-		_, err := fmt.Fprintln(a.out, "usage: git wt pull")
-		return err
-	}
-	if len(positional) != 0 {
-		return errorsForUsage("pull accepts no arguments")
-	}
-
-	p, err := a.resolveProject(cfg, "")
+// Pull fast-forwards the current managed project's trunk.
+func (a *Manager) Pull() error {
+	p, err := a.resolveProject()
 	if err != nil {
 		return err
 	}
@@ -352,24 +304,12 @@ func (a *App) runPull(cfg config, args []string) error {
 	return err
 }
 
-func (a *App) runRemove(cfg config, args []string) error {
-	var deleteBranch bool
-	positional, help, err := parseOptions(args, nil, map[string]*bool{"--delete-branch": &deleteBranch})
-	if err != nil {
-		return err
-	}
-	if help {
-		_, err := fmt.Fprintln(a.out, "usage: git wt remove <task> [--delete-branch]")
-		return err
-	}
-	if len(positional) != 1 {
-		return errorsForUsage("remove requires exactly one task")
-	}
-	task := positional[0]
+// Remove removes a clean task worktree and optionally its merged branch.
+func (a *Manager) Remove(task string, deleteBranch bool) error {
 	if err := validateTask(task); err != nil {
 		return err
 	}
-	p, err := a.resolveProject(cfg, "")
+	p, err := a.resolveProject()
 	if err != nil {
 		return err
 	}
@@ -448,49 +388,13 @@ func projectNameFromRemote(remote string) (string, error) {
 	return trimmed, nil
 }
 
-func validateNewProjectPath(root, projectRoot string) error {
-	if err := ensureLexicallyWithin(root, projectRoot); err != nil {
-		return err
-	}
+func validateNewProjectPath(projectRoot string) error {
 	if _, err := os.Lstat(projectRoot); err == nil {
 		return fmt.Errorf("destination project already exists: %s", projectRoot)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect destination project: %w", err)
 	}
-	ancestor, err := nearestExistingAncestor(projectRoot)
-	if err != nil {
-		return err
-	}
-	if existingRoot, err := nearestExistingAncestor(root); err == nil {
-		resolvedAncestor, resolveErr := filepath.EvalSymlinks(ancestor)
-		resolvedRoot, rootErr := filepath.EvalSymlinks(existingRoot)
-		if resolveErr == nil && rootErr == nil && pathContains(resolvedRoot, resolvedAncestor) {
-			return nil
-		}
-		if sameResolvedPath(existingRoot, ancestor) || pathContains(resolvedRoot, resolvedAncestor) {
-			return nil
-		}
-	}
-	// If the configured root does not yet exist, the lexical containment check
-	// is authoritative; newly created components cannot contain symlinks.
-	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return fmt.Errorf("destination %s resolves outside workspace root %s", projectRoot, root)
-}
-
-func nearestExistingAncestor(path string) (string, error) {
-	for candidate := filepath.Clean(path); ; candidate = filepath.Dir(candidate) {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("inspect destination ancestor %s: %w", candidate, err)
-		}
-		parent := filepath.Dir(candidate)
-		if parent == candidate {
-			return "", fmt.Errorf("no existing ancestor for %s", path)
-		}
-	}
+	return nil
 }
 
 func pathContains(parent, child string) bool {

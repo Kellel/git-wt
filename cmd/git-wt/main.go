@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Kellel/git-wt/internal/wt"
+	"github.com/Kellel/git-wt/wt"
 )
 
 func main() {
@@ -20,6 +20,8 @@ func run() error {
 		return fmt.Errorf("determine working directory: %w", err)
 	}
 
-	app := wt.New(cwd, os.Environ(), os.Stdout, os.Stderr)
-	return app.Run(os.Args[1:])
+	manager := wt.NewManager(cwd, os.Environ(), os.Stdout, os.Stderr)
+	command := newRootCommand(manager, os.Stdout, os.Stderr)
+	command.SetArgs(os.Args[1:])
+	return command.Execute()
 }
