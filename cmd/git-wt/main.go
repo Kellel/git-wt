@@ -1,0 +1,25 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/Kellel/git-wt/internal/wt"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "git wt: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("determine working directory: %w", err)
+	}
+
+	app := wt.New(cwd, os.Environ(), os.Stdout, os.Stderr)
+	return app.Run(os.Args[1:])
+}
