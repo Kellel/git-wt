@@ -109,8 +109,8 @@ Use `--base HEAD` for an adopted repository without an `origin`. Run
 ### `git wt list [--porcelain]`
 
 List the project's registered worktrees, branches, commits, and dirty state.
-Tracked, untracked, and ignored files all count as dirty. `--porcelain` emits
-NUL-delimited machine-readable records.
+Tracked and untracked changes count as dirty; ignored files do not.
+`--porcelain` emits NUL-delimited machine-readable records.
 
 ### `git wt path [task] [--notes]`
 
@@ -127,13 +127,15 @@ git wt path --notes         # unmanaged notes
 Fast-forward the project's `trunk/` from `origin`'s default branch. The command
 can be run from the project root, `trunk/`, or any registered task worktree. It
 refuses a dirty trunk, an active Git operation, detached HEAD, a non-default
-branch, or a non-fast-forward update.
+branch, or a non-fast-forward update. Ignored files do not block a pull.
 
-### `git wt remove <task> [--delete-branch]`
+### `git wt remove <task> [--delete-branch] [--force]`
 
-Remove a clean task worktree. The branch is retained by default. With
-`--delete-branch`, deletion is allowed only when the branch is merged into the
-remote default branch.
+Remove a clean task worktree. The branch is retained by default. The command
+refuses tracked changes and untracked or ignored files because removing the
+worktree would delete them. Use `-f` or `--force` to permanently discard those
+files. With `--delete-branch`, branch deletion is allowed only when the branch
+is merged into the remote default branch, even when force is enabled.
 
 ## Configuration
 

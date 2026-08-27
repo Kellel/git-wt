@@ -257,7 +257,7 @@ func (a *Manager) Pull() error {
 	if err != nil {
 		return err
 	}
-	status, err := a.git.run(p.trunk, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
+	status, err := a.git.run(p.trunk, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return fmt.Errorf("inspect trunk worktree: %w", err)
 	}
@@ -304,8 +304,8 @@ func (a *Manager) Pull() error {
 	return err
 }
 
-// Remove removes a clean task worktree and optionally its merged branch.
-func (a *Manager) Remove(task string, deleteBranch bool) error {
+// Remove removes a task worktree and optionally its merged branch.
+func (a *Manager) Remove(task string, options RemoveOptions) error {
 	if err := validateTask(task); err != nil {
 		return err
 	}
@@ -328,12 +328,14 @@ func (a *Manager) Remove(task string, deleteBranch bool) error {
 	if selected == nil {
 		return fmt.Errorf("task %q is not a registered worktree", task)
 	}
-	status, err := a.git.run(destination, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
-	if err != nil {
-		return fmt.Errorf("inspect task worktree: %w", err)
-	}
-	if len(status) != 0 {
-		return fmt.Errorf("refusing to remove dirty task worktree %s", destination)
+	if !options.Force {
+		status, err := a.git.run(destination, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
+		if err != nil {
+			return fmt.Errorf("inspect task worktree: %w", err)
+		}
+		if len(status) != 0 {
+			return fmt.Errorf("refusing to remove dirty task worktree %s; use --force to discard local files", destination)
+		}
 	}
 	if operation, err := a.activeGitOperation(destination); err != nil {
 		return err
@@ -342,7 +344,7 @@ func (a *Manager) Remove(task string, deleteBranch bool) error {
 	}
 
 	branch := strings.TrimPrefix(selected.branchRef, "refs/heads/")
-	if deleteBranch {
+	if options.DeleteBranch {
 		if selected.detached || branch == "" {
 			return errors.New("cannot delete a branch for a detached worktree")
 		}
@@ -361,10 +363,15 @@ func (a *Manager) Remove(task string, deleteBranch bool) error {
 	if _, err := fmt.Fprintf(a.out, "Task: %s\nWorktree: %s\nBranch: %s\n", task, destination, branch); err != nil {
 		return err
 	}
-	if _, err := a.git.run(p.trunk, "worktree", "remove", destination); err != nil {
+	removeArgs := []string{"worktree", "remove"}
+	if options.Force {
+		removeArgs = append(removeArgs, "--force")
+	}
+	removeArgs = append(removeArgs, destination)
+	if _, err := a.git.run(p.trunk, removeArgs...); err != nil {
 		return fmt.Errorf("remove task worktree: %w", err)
 	}
-	if deleteBranch {
+	if options.DeleteBranch {
 		if _, err := a.git.run(p.trunk, "update-ref", "-d", "refs/heads/"+branch, selected.head); err != nil {
 			return fmt.Errorf("worktree removed but branch %q could not be deleted: %w", branch, err)
 		}

@@ -138,15 +138,21 @@ func newPullCommand(manager wt.Worktree) *cobra.Command {
 }
 
 func newRemoveCommand(manager wt.Worktree) *cobra.Command {
-	var deleteBranch bool
+	var options wt.RemoveOptions
 	command := &cobra.Command{
 		Use:   "remove <task>",
 		Short: "Safely remove a task worktree",
-		Args:  cobra.ExactArgs(1),
+		Long: `Remove a task worktree while retaining its branch by default.
+
+The command refuses local changes and untracked or ignored files. Use --force
+to permanently discard those files. Active Git operations and unmerged branch
+deletion remain protected even when --force is set.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return manager.Remove(args[0], deleteBranch)
+			return manager.Remove(args[0], options)
 		},
 	}
-	command.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete the merged task branch")
+	command.Flags().BoolVar(&options.DeleteBranch, "delete-branch", false, "also delete the merged task branch")
+	command.Flags().BoolVarP(&options.Force, "force", "f", false, "discard local changes and untracked or ignored files")
 	return command
 }

@@ -9,7 +9,7 @@ type Worktree interface {
 	List(porcelain bool) error
 	Path(task string, notes bool) error
 	Pull() error
-	Remove(task string, deleteBranch bool) error
+	Remove(task string, options RemoveOptions) error
 }
 
 // NewOptions controls the branch created for a new task worktree.
@@ -21,6 +21,14 @@ type NewOptions struct {
 	Base string
 	// BranchTemplate overrides the configured branch template and must contain %s.
 	BranchTemplate string
+}
+
+// RemoveOptions controls cleanup performed when removing a task worktree.
+type RemoveOptions struct {
+	// DeleteBranch deletes the task branch after verifying it is merged.
+	DeleteBranch bool
+	// Force discards local changes and untracked or ignored files in the worktree.
+	Force bool
 }
 
 var _ Worktree = (*Manager)(nil)

@@ -135,19 +135,17 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	assertDirectory(t, taskPath)
 	gitRun(t, env, taskPath, "restore", "tracked.txt")
 	writeFile(t, filepath.Join(taskPath, "ignored.txt"), "ignored build output\n")
-	stdout, _ = runTestCLI(t, projectRoot, env, "list")
-	assertContains(t, stdout, "TASK-123-example")
-	assertContains(t, stdout, "yes")
+	stdout, _ = runTestCLI(t, projectRoot, env, "list", "--porcelain")
+	assertPorcelainDirty(t, stdout, "TASK-123-example", false)
 	_, _, err = runTestCLIError(projectRoot, env, "remove", "TASK-123-example")
 	assertErrorContains(t, err, "refusing to remove dirty task worktree")
 	if got := readFile(t, filepath.Join(taskPath, "ignored.txt")); got != "ignored build output\n" {
 		t.Fatalf("ignored file changed: %q", got)
 	}
-	if err := os.Remove(filepath.Join(taskPath, "ignored.txt")); err != nil {
-		t.Fatal(err)
-	}
+	writeFile(t, filepath.Join(taskPath, "tracked.txt"), "discarded tracked change\n")
+	writeFile(t, filepath.Join(taskPath, "untracked.txt"), "discarded untracked file\n")
 	stdout, _ = runTestCLI(t, projectRoot, env,
-		"remove", "TASK-123-example", "--delete-branch",
+		"remove", "TASK-123-example", "--delete-branch", "--force",
 	)
 	assertContains(t, stdout, "Removed task worktree and branch TASK-123-example")
 	if _, err := os.Stat(taskPath); !errors.Is(err, os.ErrNotExist) {
@@ -464,6 +462,7 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	gitRun(t, env, seed, "commit", "-m", "upstream update")
 	gitRun(t, env, seed, "push", "origin", "main")
 
+	writeFile(t, filepath.Join(trunk, "ignored.txt"), "ignored build output\n")
 	stdout, _ := runTestCLI(t, task, env, "pull")
 	assertContains(t, stdout, "Trunk: "+trunk)
 	assertContains(t, stdout, "Branch: main")
@@ -473,6 +472,9 @@ func TestPullUpdatesTrunkFromTaskWorktree(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(task, "tracked.txt")); got != "initial\n" {
 		t.Fatalf("task worktree changed during trunk pull: %q", got)
+	}
+	if got := readFile(t, filepath.Join(trunk, "ignored.txt")); got != "ignored build output\n" {
+		t.Fatalf("ignored trunk file changed during pull: %q", got)
 	}
 
 	writeFile(t, filepath.Join(trunk, "tracked.txt"), "dirty trunk\n")
@@ -536,7 +538,7 @@ func TestRemoveRefusesUnmergedBranchAndActiveOperation(t *testing.T) {
 	gitRun(t, env, taskPath, "add", "feature.txt")
 	gitRun(t, env, taskPath, "commit", "-m", "feature")
 
-	_, _, err := runTestCLIError(trunk, env, "remove", "unmerged", "--delete-branch")
+	_, _, err := runTestCLIError(trunk, env, "remove", "unmerged", "--delete-branch", "--force")
 	assertErrorContains(t, err, "refusing to delete unmerged branch")
 	assertDirectory(t, taskPath)
 
@@ -548,7 +550,7 @@ func TestRemoveRefusesUnmergedBranchAndActiveOperation(t *testing.T) {
 	if err := os.Remove(filepath.Join(taskPath, ".git-operation-placeholder")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = runTestCLIError(trunk, env, "remove", "unmerged")
+	_, _, err = runTestCLIError(trunk, env, "remove", "unmerged", "--force")
 	assertErrorContains(t, err, "active Git operation marker rebase-merge")
 	assertDirectory(t, taskPath)
 }
@@ -759,6 +761,19 @@ func assertContains(t *testing.T, value, substring string) {
 	if !strings.Contains(value, substring) {
 		t.Fatalf("%q does not contain %q", value, substring)
 	}
+}
+
+func assertPorcelainDirty(t *testing.T, output, task string, want bool) {
+	t.Helper()
+	for _, record := range bytes.Split([]byte(output), []byte{0, 0}) {
+		if bytes.Contains(record, []byte("task "+task+"\x00")) {
+			if !bytes.Contains(record, []byte(fmt.Sprintf("dirty %t", want))) {
+				t.Fatalf("task %q dirty state is not %t: %q", task, want, record)
+			}
+			return
+		}
+	}
+	t.Fatalf("task %q not found in porcelain output: %q", task, output)
 }
 
 func assertErrorContains(t *testing.T, err error, substring string) {

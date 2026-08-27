@@ -218,7 +218,7 @@ func (a *Manager) projectWorktrees(p project, includeDirty bool) ([]worktree, er
 	}
 	if includeDirty {
 		for i := range worktrees {
-			status, err := a.git.run(worktrees[i].path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
+			status, err := a.git.run(worktrees[i].path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 			if err != nil {
 				return nil, fmt.Errorf("inspect worktree %s: %w", worktrees[i].path, err)
 			}

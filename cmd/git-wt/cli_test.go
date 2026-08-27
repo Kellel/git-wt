@@ -49,8 +49,8 @@ func (f *fakeWorktreeManager) Pull() error {
 	return f.err
 }
 
-func (f *fakeWorktreeManager) Remove(task string, deleteBranch bool) error {
-	f.call = managerCall{"Remove", []any{task, deleteBranch}}
+func (f *fakeWorktreeManager) Remove(task string, options wt.RemoveOptions) error {
+	f.call = managerCall{"Remove", []any{task, options}}
 	return f.err
 }
 
@@ -70,7 +70,7 @@ func TestCommandDispatch(t *testing.T) {
 		{"task path", []string{"path", "task"}, managerCall{"Path", []any{"task", false}}},
 		{"notes path", []string{"path", "--notes"}, managerCall{"Path", []any{"", true}}},
 		{"pull", []string{"pull"}, managerCall{"Pull", nil}},
-		{"remove", []string{"remove", "task", "--delete-branch"}, managerCall{"Remove", []any{"task", true}}},
+		{"remove", []string{"remove", "task", "--delete-branch", "-f"}, managerCall{"Remove", []any{"task", wt.RemoveOptions{DeleteBranch: true, Force: true}}}},
 	}
 
 	for _, test := range tests {
