@@ -19,6 +19,11 @@ New projects also receive a local `AGENTS.md` that explains the layout and asks
 coding agents to create a task worktree for new bodies of work. It lives outside
 the repository and is not committed.
 
+`clone` and `adopt` also install an ignored `trunk/.codex/config.toml`. It makes
+the stable trunk read-only to Codex and requires confirmation before direct
+trunk changes; task worktrees remain writable. An existing Codex config is left
+unchanged and produces a warning.
+
 ## Requirements
 
 - Git with `git worktree list --porcelain -z` support

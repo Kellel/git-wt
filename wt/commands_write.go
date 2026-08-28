@@ -36,6 +36,9 @@ func (a *Manager) Clone(remote, destination string) error {
 	if _, err := a.git.run("", "clone", "--", remote, p.trunk); err != nil {
 		return fmt.Errorf("clone failed; partial project remains at %s (created paths: %s): %w", p.root, strings.Join(created, ", "), err)
 	}
+	if _, err := a.installCodexTrunkGuard(p.trunk, p.trunk); err != nil {
+		return fmt.Errorf("clone completed at %s, but Codex trunk protection could not be installed: %w", p.trunk, err)
+	}
 	_, err = fmt.Fprintf(a.out, "Created project %s\n", p.root)
 	return err
 }
@@ -87,7 +90,14 @@ func (a *Manager) Adopt(source string, dryRun bool) error {
 	if err != nil {
 		return a.rollbackAdoption(source, temporary, created, err)
 	}
+	cleanupGuard, err := a.installCodexTrunkGuard(temporary, p.trunk)
+	if err != nil {
+		return a.rollbackAdoption(source, temporary, created, fmt.Errorf("install Codex trunk protection: %w", err))
+	}
 	if err := a.rename(temporary, p.trunk); err != nil {
+		if cleanupErr := cleanupGuard(); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		return a.rollbackAdoption(source, temporary, created, fmt.Errorf("move checkout into trunk: %w", err))
 	}
 

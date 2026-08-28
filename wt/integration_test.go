@@ -59,6 +59,7 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	assertDirectory(t, trunk)
 	assertDirectory(t, worktrees)
 	assertDirectory(t, notes)
+	assertCodexTrunkGuard(t, env, trunk)
 
 	stdout, _ = runTestCLI(t, projectRoot, env,
 		"path",
@@ -92,6 +93,7 @@ func TestCloneNewListPathAndRemove(t *testing.T) {
 	if got := gitOutput(t, env, taskPath, "branch", "--show-current"); got != "TASK-123-example" {
 		t.Fatalf("task branch = %q", got)
 	}
+	assertNotExist(t, filepath.Join(taskPath, filepath.FromSlash(codexConfigRelativePath)))
 
 	stdout, _ = runTestCLI(t, taskPath, env, "path", "TASK-123-example")
 	if got := strings.TrimSpace(stdout); got != taskPath {
@@ -180,7 +182,7 @@ func TestAdoptPreservesCompleteCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	statusBefore := gitOutputRaw(t, env, source, "status", "--porcelain=v1", "-z", "--ignored")
+	statusBefore := gitOutputRaw(t, env, source, "status", "--porcelain=v1", "-z")
 	refsBefore := gitOutputRaw(t, env, source, "for-each-ref", "--format=%(refname)%00%(objectname)")
 	reflogBefore := gitOutputRaw(t, env, source, "reflog", "show", "--all", "--format=%H%x00%gs")
 	hookBefore := readFile(t, filepath.Join(source, ".git", "hooks", "pre-commit"))
@@ -194,6 +196,7 @@ func TestAdoptPreservesCompleteCheckout(t *testing.T) {
 	assertNotExist(t, filepath.Join(source, "trunk"))
 	assertNotExist(t, filepath.Join(source, "worktrees"))
 	assertNotExist(t, filepath.Join(source, "notes"))
+	assertNotExist(t, filepath.Join(source, filepath.FromSlash(codexConfigRelativePath)))
 
 	stdout, stderr := runTestCLI(t, nested, env,
 		"adopt",
@@ -210,9 +213,13 @@ func TestAdoptPreservesCompleteCheckout(t *testing.T) {
 	assertContains(t, guidance, "default to creating one with `git wt new <task>`")
 	assertContains(t, guidance, "Repository code and repository-specific instructions live in `trunk/`")
 	assertContains(t, guidance, "Temporary agent working files, scratchpads, plans, and handoff notes may be placed in `notes/`")
+	assertCodexTrunkGuard(t, env, trunk)
 
-	if got := gitOutputRaw(t, env, trunk, "status", "--porcelain=v1", "-z", "--ignored"); got != statusBefore {
+	if got := gitOutputRaw(t, env, trunk, "status", "--porcelain=v1", "-z"); got != statusBefore {
 		t.Fatalf("status changed during adoption\nbefore: %q\nafter:  %q", statusBefore, got)
+	}
+	if got := readFile(t, filepath.Join(trunk, "ignored.txt")); got != "ignored\n" {
+		t.Fatalf("ignored file changed: %q", got)
 	}
 	if got := gitOutputRaw(t, env, trunk, "for-each-ref", "--format=%(refname)%00%(objectname)"); got != refsBefore {
 		t.Fatalf("refs changed during adoption\nbefore: %q\nafter:  %q", refsBefore, got)
@@ -325,6 +332,8 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		env := testEnvironment(t, testRoot)
 		source := filepath.Join(testRoot, "source")
 		initRepository(t, source, env)
+		excludePath := filepath.Join(source, ".git", "info", "exclude")
+		excludeBefore := readFile(t, excludePath)
 		calls := 0
 		manager, _, _ := newTestManagerWithRename(testRoot, env, func(oldPath, newPath string) error {
 			calls++
@@ -339,6 +348,10 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 		assertDirectory(t, filepath.Join(source, ".git"))
 		assertNotExist(t, filepath.Join(source, "trunk"))
 		assertNotExist(t, filepath.Join(source, "AGENTS.md"))
+		assertNotExist(t, filepath.Join(source, filepath.FromSlash(codexConfigRelativePath)))
+		if got := readFile(t, excludePath); got != excludeBefore {
+			t.Fatalf("Git exclude file changed during rollback\nbefore: %q\nafter:  %q", excludeBefore, got)
+		}
 		matches, globErr := filepath.Glob(filepath.Join(testRoot, ".source.git-wt-adopt-*"))
 		if globErr != nil {
 			t.Fatal(globErr)
@@ -347,6 +360,30 @@ func TestAdoptRefusesUnsupportedOrUnsafeSources(t *testing.T) {
 			t.Fatalf("temporary adoption paths remain: %v", matches)
 		}
 	})
+}
+
+func TestAdoptPreservesExistingCodexConfig(t *testing.T) {
+	t.Parallel()
+
+	testRoot := t.TempDir()
+	env := testEnvironment(t, testRoot)
+	source := filepath.Join(testRoot, "demo")
+	initRepository(t, source, env)
+	configPath := filepath.Join(source, filepath.FromSlash(codexConfigRelativePath))
+	const existingConfig = "sandbox_mode = \"workspace-write\"\n"
+	writeFile(t, configPath, existingConfig)
+	excludePath := filepath.Join(source, ".git", "info", "exclude")
+	excludeBefore := readFile(t, excludePath)
+
+	_, stderr := runTestCLI(t, source, env, "adopt")
+	trunk := filepath.Join(source, "trunk")
+	assertContains(t, stderr, "Codex trunk protection was not installed")
+	if got := readFile(t, filepath.Join(trunk, filepath.FromSlash(codexConfigRelativePath))); got != existingConfig {
+		t.Fatalf("existing Codex config changed: %q", got)
+	}
+	if got := readFile(t, filepath.Join(trunk, ".git", "info", "exclude")); got != excludeBefore {
+		t.Fatalf("Git exclude file changed for existing Codex config\nbefore: %q\nafter:  %q", excludeBefore, got)
+	}
 }
 
 func TestCloneDerivesProjectAndReportsPartialFailure(t *testing.T) {
@@ -753,6 +790,18 @@ func assertNotExist(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected %s not to exist, got %v", path, err)
+	}
+}
+
+func assertCodexTrunkGuard(t *testing.T, env []string, trunk string) {
+	t.Helper()
+	configPath := filepath.Join(trunk, filepath.FromSlash(codexConfigRelativePath))
+	config := readFile(t, configPath)
+	assertContains(t, config, "approval_policy = \"on-request\"")
+	assertContains(t, config, "sandbox_mode = \"read-only\"")
+	assertContains(t, config, "ask the user to choose")
+	if code := gitExit(t, env, trunk, "check-ignore", "--quiet", "--", codexConfigRelativePath); code != 0 {
+		t.Fatalf("Codex trunk config is not ignored; git check-ignore exit = %d", code)
 	}
 }
 
