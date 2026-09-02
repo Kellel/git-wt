@@ -66,6 +66,7 @@ func TestCommandDispatch(t *testing.T) {
 		{"clone destination", []string{"clone", "remote", "project"}, managerCall{"Clone", []any{"remote", "project"}}},
 		{"adopt", []string{"adopt", "source", "--dry-run"}, managerCall{"Adopt", []any{"source", true}}},
 		{"new", []string{"new", "task", "--branch", "feature", "--base", "HEAD", "--branch-template", "user/%s"}, managerCall{"NewWorktree", []any{"task", wt.NewOptions{Branch: "feature", Base: "HEAD", BranchTemplate: "user/%s"}}}},
+		{"new detached", []string{"new", "review", "--detach", "--base", "refs/review/mr/123"}, managerCall{"NewWorktree", []any{"review", wt.NewOptions{Base: "refs/review/mr/123", Detach: true}}}},
 		{"list", []string{"list", "--porcelain"}, managerCall{"List", []any{true}}},
 		{"task path", []string{"path", "task"}, managerCall{"Path", []any{"task", false}}},
 		{"notes path", []string{"path", "--notes"}, managerCall{"Path", []any{"", true}}},

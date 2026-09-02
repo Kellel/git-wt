@@ -1,6 +1,7 @@
 # git-wt
 
-`git wt` is a worktree-first project manager. It keeps a stable primary
+This repository contains `git wt`, a worktree-first project manager, and a
+Codex skill for interactive code review. `git wt` keeps a stable primary
 checkout, task worktrees, and local notes together in one project directory:
 
 ```text
@@ -45,6 +46,11 @@ Alternatively, install from a local checkout:
 ```bash
 make install
 ```
+
+The local Make target installs both the `git-wt` binary and the bundled
+`code-review` skill. Set `CODEX_SKILLS_DIR` to override the default
+`~/.codex/skills` destination. To install only one component, use
+`make install-cli` or `make install-skill`.
 
 Ensure your Go binary directory is on `PATH`. Git discovers the `git-wt`
 executable automatically and exposes it as `git wt`:
@@ -106,10 +112,12 @@ task name and it starts from `origin`'s default branch.
 git wt new TASK-123-description
 git wt new TASK-123-description --base origin/develop
 git wt new TASK-123-description --branch kellen/TASK-123-description
+git wt new mr-123 --detach --base refs/review/mr/123
 ```
 
 Use `--base HEAD` for an adopted repository without an `origin`. Run
-`git wt new --help` for all options.
+`git wt new --help` for all options. `--detach` creates a worktree without a
+local branch, which is useful for temporary review checkouts.
 
 ### `git wt list [--porcelain]`
 
@@ -177,6 +185,13 @@ Git-porcelain and remote-name parsing have native Go fuzz targets behind the
 ```bash
 make fuzz
 ```
+
+## Code-review skill
+
+The bundled [`code-review`](skills/code-review/SKILL.md) Codex skill performs
+interactive reviews and uses `git wt` to prepare detached worktrees for GitLab
+merge requests. It replaces the former standalone Python launcher; the skill
+contains the review workflow while Git and `git wt` perform the checkout work.
 
 ## License
 

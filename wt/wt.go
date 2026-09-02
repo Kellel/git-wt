@@ -21,6 +21,8 @@ type NewOptions struct {
 	Base string
 	// BranchTemplate overrides the configured branch template and must contain %s.
 	BranchTemplate string
+	// Detach creates the worktree at Base without creating a branch.
+	Detach bool
 }
 
 // RemoveOptions controls cleanup performed when removing a task worktree.

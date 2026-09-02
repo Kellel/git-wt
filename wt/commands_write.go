@@ -199,11 +199,13 @@ func (a *Manager) validateAdoption(source string, p project) error {
 	return nil
 }
 
-// NewWorktree creates a task worktree and its branch.
+// NewWorktree creates a task worktree, with a branch unless Detach is set.
 func (a *Manager) NewWorktree(task string, options NewOptions) error {
-	cfg, err := a.loadConfig(options.BranchTemplate)
-	if err != nil {
-		return err
+	if options.Detach && options.Branch != "" {
+		return errors.New("--detach cannot be combined with --branch")
+	}
+	if options.Detach && options.BranchTemplate != "" {
+		return errors.New("--detach cannot be combined with --branch-template")
 	}
 	if err := validateTask(task); err != nil {
 		return err
@@ -228,13 +230,6 @@ func (a *Manager) NewWorktree(task string, options NewOptions) error {
 		}
 	}
 
-	branch := options.Branch
-	if branch == "" {
-		branch = strings.ReplaceAll(cfg.branchTemplate, "%s", task)
-	}
-	if _, err := a.git.run(p.trunk, "check-ref-format", "--branch", branch); err != nil {
-		return fmt.Errorf("invalid branch name %q: %w", branch, err)
-	}
 	base := options.Base
 	if base == "" {
 		base, err = a.defaultBase(p)
@@ -244,6 +239,28 @@ func (a *Manager) NewWorktree(task string, options NewOptions) error {
 	}
 	if _, err := a.git.run(p.trunk, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
 		return fmt.Errorf("base %q is not a commit: %w", base, err)
+	}
+	if options.Detach {
+		if _, err := fmt.Fprintf(a.out, "Project: %s\nTask: %s\nDestination: %s\nBase: %s\nBranch: (detached)\n", p.root, task, destination, base); err != nil {
+			return err
+		}
+		if _, err := a.git.run(p.trunk, "worktree", "add", "--detach", destination, base); err != nil {
+			return fmt.Errorf("create detached task worktree: %w", err)
+		}
+		_, err = fmt.Fprintf(a.out, "Created detached task worktree %s\n", destination)
+		return err
+	}
+
+	cfg, err := a.loadConfig(options.BranchTemplate)
+	if err != nil {
+		return err
+	}
+	branch := options.Branch
+	if branch == "" {
+		branch = strings.ReplaceAll(cfg.branchTemplate, "%s", task)
+	}
+	if _, err := a.git.run(p.trunk, "check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("invalid branch name %q: %w", branch, err)
 	}
 	if _, err := a.git.run(p.trunk, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
 		return fmt.Errorf("branch %q already exists", branch)
@@ -386,6 +403,10 @@ func (a *Manager) Remove(task string, options RemoveOptions) error {
 			return fmt.Errorf("worktree removed but branch %q could not be deleted: %w", branch, err)
 		}
 		_, err = fmt.Fprintf(a.out, "Removed task worktree and branch %s\n", branch)
+		return err
+	}
+	if selected.detached {
+		_, err = fmt.Fprintln(a.out, "Removed detached task worktree")
 		return err
 	}
 	_, err = fmt.Fprintln(a.out, "Removed task worktree; branch retained")

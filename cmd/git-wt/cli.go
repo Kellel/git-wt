@@ -77,12 +77,15 @@ func newWorktreeCommand(manager wt.Worktree) *cobra.Command {
 	var options wt.NewOptions
 	command := &cobra.Command{
 		Use:   "new <task>",
-		Short: "Create a task worktree and branch",
+		Short: "Create a task worktree",
 		Long: `Create a task worktree and a new branch at the selected base revision.
 
 The base defaults to origin's default branch. Use --base to start from a
 different branch, tag, or commit. For an adopted repository without an origin,
-use --base HEAD to start from the current trunk commit.`,
+use --base HEAD to start from the current trunk commit.
+
+Use --detach for a temporary inspection or review worktree that does not need a
+local branch.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return manager.NewWorktree(args[0], options)
@@ -91,6 +94,7 @@ use --base HEAD to start from the current trunk commit.`,
 	command.Flags().StringVar(&options.Branch, "branch", "", "branch name")
 	command.Flags().StringVar(&options.Base, "base", "", "branch, tag, or commit from which to create the worktree")
 	command.Flags().StringVar(&options.BranchTemplate, "branch-template", "", "branch template containing %s")
+	command.Flags().BoolVar(&options.Detach, "detach", false, "create a detached worktree without a branch")
 	return command
 }
 

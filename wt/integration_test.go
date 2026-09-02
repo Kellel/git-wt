@@ -447,6 +447,39 @@ func TestRemoveWithoutBranchDeletionRetainsBranch(t *testing.T) {
 	}
 }
 
+func TestNewDetachedWorktree(t *testing.T) {
+	t.Parallel()
+
+	testRoot := t.TempDir()
+	env := testEnvironment(t, testRoot)
+	remote := createRemote(t, testRoot, env)
+	projectRoot := filepath.Join(testRoot, "workspace", "demo")
+	runTestCLI(t, testRoot, env, "clone", remote, projectRoot)
+	trunk := filepath.Join(projectRoot, "trunk")
+
+	stdout, _ := runTestCLI(t, trunk, env, "new", "mr-123", "--detach", "--base", "HEAD")
+	review := filepath.Join(projectRoot, "worktrees", "mr-123")
+	assertContains(t, stdout, "Branch: (detached)")
+	if branch := gitOutput(t, env, review, "branch", "--show-current"); branch != "" {
+		t.Fatalf("detached worktree branch = %q, want empty", branch)
+	}
+
+	stdout, _ = runTestCLI(t, review, env, "list", "--porcelain")
+	if !bytes.Contains([]byte(stdout), []byte("task mr-123\x00")) ||
+		!bytes.Contains([]byte(stdout), []byte("detached true\x00")) {
+		t.Fatalf("porcelain output missing detached review worktree: %q", stdout)
+	}
+
+	_, _, err := runTestCLIError(trunk, env, "new", "invalid", "--detach", "--branch", "review")
+	assertErrorContains(t, err, "--detach cannot be combined with --branch")
+	_, _, err = runTestCLIError(trunk, env, "new", "invalid", "--detach", "--branch-template", "review/%s")
+	assertErrorContains(t, err, "--detach cannot be combined with --branch-template")
+
+	stdout, _ = runTestCLI(t, review, env, "remove", "mr-123")
+	assertContains(t, stdout, "Removed detached task worktree")
+	assertNotExist(t, review)
+}
+
 func TestEveryCommandProvidesHelp(t *testing.T) {
 	t.Parallel()
 
