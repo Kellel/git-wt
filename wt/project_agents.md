@@ -12,7 +12,7 @@ Repository code and repository-specific instructions live in `trunk/` and the ta
 
 ## Agent workflow
 
-- Run `git wt list` before starting a new body of implementation work.
+- Use `git wt list` when you need to discover or select a task worktree. Continue in an already established task worktree without repeating discovery.
 - Use `git wt pull` from anywhere in the project to fast-forward the clean `trunk/` default branch.
 - If an appropriate task worktree already exists, continue there.
 - Otherwise, default to creating one with `git wt new <task>`, then work from the path returned by `git wt path <task>`.
